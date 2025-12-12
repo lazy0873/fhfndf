@@ -1,192 +1,108 @@
-import random
-import datetime
+
+
 import os
-import json
+import random
+import logging
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
-)
+from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters
 from flask import Flask
-from threading import Thread
 
-TOKEN = "8556431265:AAFZA51BdMbGdAsqpDu7BlNNu4lzpAyy8JM"
-USER_FILE = "users.json"  # Archivo donde guardamos los IDs de los usuarios
+# Configuración de logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# -------------------------
-# Cargar usuarios desde el archivo
-# -------------------------
-def load_users():
-    if os.path.exists(USER_FILE):
-        with open(USER_FILE, "r") as file:
-            return json.load(file)
-    return []
-
-# -------------------------
-# Guardar usuarios en el archivo
-# -------------------------
-def save_user(user_id):
-    users = load_users()
-    if user_id not in users:
-        users.append(user_id)
-        with open(USER_FILE, "w") as file:
-            json.dump(users, file)
-
-# -------------------------
-# Preguntas motivacionales diarias (Ampliadas)
-# -------------------------
-PREGUNTAS = {
-    "mañana": [
-        "🌅 ¡Buenos días! ¿Qué puedes hacer hoy para acercarte más a tus metas?",
-        "☀️ Al despertar, ¿qué es lo primero que piensas? ¡Haz de hoy un gran día!",
-        "💧 ¿Ya tomaste agua al despertar? Hidratarte es clave para comenzar el día con energía.",
-        "🥗 ¿Tienes algún desayuno saludable planeado hoy? ¡Lo que comes al inicio del día marca la diferencia!",
-        "🧠 Hoy, ¿qué te gustaría lograr en tu día? ¡Escribe tus metas y hazlas realidad!",
-        "🌞 Si pudieras definir tu objetivo principal para hoy, ¿cuál sería?",
-        "🏃‍♂️ ¿Listo para moverte hoy? Recuerda que el movimiento es clave para un día productivo.",
-        "🧘‍♀️ ¿Te has dado un momento para respirar profundamente hoy? El mindfulness también es importante.",
-        "💪 ¿Cómo te sientes para entrenar hoy? ¡Recuerda que tu cuerpo es tu mejor aliado!"
-    ],
-    "tarde": [
-        "🔥 ¿Ya entrenaste hoy? Si no es así, ¿qué te detiene? ¡Es tu momento!",
-        "💪 ¿Te sientes con energía? Si no, tal vez un buen snack saludable te recargue.",
-        "🥗 ¿Qué has comido hasta ahora? ¡Recuerda que lo que consumes afecta cómo te sientes!",
-        "💬 ¿Cómo va tu jornada hasta ahora? ¿Necesitas un descanso o un pequeño impulso?",
-        "⚡ ¿Te gustaría compartir algo que te haya motivado hoy? ¡Es un buen momento para reflexionar!",
-        "🌱 Si estás cansado, ¿qué podrías hacer para recargar energías? ¡Escucha a tu cuerpo!",
-        "🏋️‍♀️ ¿Te has dado tiempo para hacer alguna actividad física hoy? ¡Aprovecha ese impulso!",
-        "📚 ¿Estás aprendiendo algo nuevo hoy? ¡El conocimiento es poder!",
-        "🌟 ¿Hoy es un día para avanzar o simplemente descansar? ¡Ambos son válidos!"
-    ],
-    "noche": [
-        "🌙 ¡Gran trabajo hoy! ¿Cómo te sientes al final del día? ¡Cada esfuerzo cuenta!",
-        "💭 Hoy, ¿qué aprendiste sobre ti mismo/a? ¡El aprendizaje continuo es parte del crecimiento!",
-        "🧘‍♀️ ¿Qué hiciste hoy para relajarte? El descanso también es esencial para tu progreso.",
-        "🍽️ ¿Comiste algo nutritivo para la cena? ¡Recuerda que lo que consumes ayuda a tu recuperación!",
-        "📈 ¿Cuál fue tu mayor logro hoy? ¡Celebra tus victorias, por pequeñas que sean!",
-        "🌙 Al final del día, ¿qué te gustaría mejorar mañana? ¡Cada día es una nueva oportunidad!",
-        "✨ ¿Hiciste algo hoy por tu bienestar mental? ¡No olvides que tu mente también necesita cuidado!",
-        "🎯 ¿Tus metas están claras para mañana? ¡Prepara tu mente y cuerpo para un nuevo día!",
-        "🌱 Reflexiona: ¿cómo puedes ser aún más eficiente mañana? ¡Haz que cada día cuente!"
-    ]
-}
-
-# -------------------------
-# Frases motivacionales
-# -------------------------
-MOTIVACION = [
-    "✨ ¡Lo estás haciendo increíble! Cada día es una nueva oportunidad para crecer.",
-    "🔥 No te detengas ahora, ¡estás más cerca de lo que crees!",
-    "💪 *La disciplina hoy* es la *victoria mañana*",
-    "🌱 Cada paso cuenta, no importa cuán pequeño sea, estás avanzando.",
-    "💥 Tienes todo lo necesario para lograr tus metas, ¡no te rindas!",
-    "🌟 Hoy es un buen día para seguir trabajando en ti mismo/a. ¡Sigue así!",
-    "🚀 El esfuerzo de hoy te llevará a la mejor versión de ti mañana. ¡Sigue adelante!",
-    "🌈 Cada esfuerzo suma, y tú estás en el camino correcto. ¡Sigue avanzando!",
-    "🏅 El éxito no es un destino, es un camino. ¡Sigue caminando con fuerza!"
-]
-
-# -------------------------
-# Respuestas del bot
-# -------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.chat_id
-    save_user(user_id)  # Guardar el ID del usuario al iniciar el bot
-
-    bienvenida = (
-        "🎉 *¡Bienvenido a CoreX!*\n\n"
-        "¡Estás a punto de comenzar una aventura increíble hacia tu mejor versión! 🚀💪\n\n"
-        "Soy tu compañero de entrenamiento y motivación, aquí para apoyarte en cada paso de tu jornada.\n"
-        "¡Lo que más quiero es que te sientas fuerte, motivado y listo para romperla cada día! 🔥✨\n\n"
-        "Recuerda: ¡Nunca estás solo/a en esto! Cada día te enviaré preguntas, consejos y mucho ánimo para que "
-        "sigamos avanzando juntos en tu camino hacia el éxito. 💥"
-    )
-
-    await update.message.reply_text(bienvenida)
-
-async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text.lower()
-
-    # Responder a situaciones negativas
-    if "cansado" in texto or "no puedo" in texto or "agotado" in texto:
-        mensaje_emocional = (
-            "💛 *Te escucho.* A veces no es fácil, pero recuerda esto:\n\n"
-            "✨ *En CoreX creemos en ti incluso en los días difíciles.* ¡Eres más fuerte de lo que crees!\n\n"
-            "¿Qué te está costando más hoy? Cuéntame, estoy aquí para apoyarte."
-        )
-    # Responder a situaciones positivas
-    elif "bien" in texto or "motivado" in texto or "entrené" in texto:
-        mensaje_emocional = (
-            "🔥 ¡Eso me encanta escuchar! Así se construye una mentalidad CoreX. ¡Sigue así!\n\n"
-            "*Felicitaciones* por dar el 100% hoy, ¡lo estás logrando!"
-        )
-    # Responder a cualquier otra situación
-    else:
-        mensaje_emocional = "💬 Entiendo, gracias por compartirlo. Estoy contigo en este camino hacia tu mejor versión."
-
-    # Enviar mensaje motivacional
-    await update.message.reply_text(mensaje_emocional)
-
-    # Enviar un consejo motivacional
-    await update.message.reply_text(random.choice(MOTIVACION))
-
-# -------------------------
-# Tareas automáticas diarias (horarios fijos)
-# -------------------------
-async def mensajes_diarios(context: ContextTypes.DEFAULT_TYPE):
-    users = load_users()  # Cargar los usuarios desde el archivo
-
-    # Definir horarios fijos para enviar preguntas
-    hora_preguntas = {
-        "mañana": datetime.time(hour=8, minute=0),
-        "tarde": datetime.time(hour=14, minute=0),
-        "noche": datetime.time(hour=20, minute=0)
-    }
-
-    for user in users:
-        hora_actual = datetime.datetime.now().time()
-
-        if hora_actual < hora_preguntas["mañana"]:
-            mensaje = random.choice(PREGUNTAS["mañana"])
-        elif hora_actual < hora_preguntas["tarde"]:
-            mensaje = random.choice(PREGUNTAS["tarde"])
-        else:
-            mensaje = random.choice(PREGUNTAS["noche"])
-
-        # Enviar mensaje con la pregunta motivacional
-        await context.bot.send_message(chat_id=user, text=mensaje)
-
-        # Enviar mensaje de motivación
-        await context.bot.send_message(chat_id=user, text=random.choice(MOTIVACION))
-
-# -------------------------
-# Inicializar Flask
-# -------------------------
+# Crear la aplicación Flask
 app = Flask(__name__)
 
-@app.route('/')
-def webhook():
-    return 'Bot de CoreX en funcionamiento!'
+# Token del bot
+TOKEN = os.getenv('8556431265:AAFZA51BdMbGdAsqpDu7BlNNu4lzpAyy8JM')  # Asegúrate de que esta variable esté configurada en Render
 
-# -------------------------
-# Main para ejecutar Flask y Telegram
-# -------------------------
-def start_flask():
-    app.run(host="0.0.0.0", port=5000)
+# Inicializar Updater y Dispatcher para el bot
+updater = Updater(token=TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
+# Preguntas motivacionales variadas para enviar a lo largo de los días
+motivational_questions = [
+    "¿Ya desayunaste hoy? ¿Listo para empezar con energía?",
+    "¿Comiste algo saludable? ¡Recuerda que el cuerpo es tu templo!",
+    "¿Cómo te sientes hoy? ¡Hoy es un buen día para superar tus límites!",
+    "¿Ya entrenaste hoy? ¡Recuerda que cada pequeño paso te acerca a tu meta!",
+    "¿Te has hidratado? ¡El agua es clave para mantenerte al 100%!",
+    "¿Qué metas tienes hoy? ¡Vamos a alcanzarlas juntos!",
+    "¿Ya has movido tu cuerpo? ¡El entrenamiento es la clave del éxito!",
+    "¿Te has estirado hoy? ¡No olvides cuidar tus músculos!"
+]
+
+# Frases motivacionales
+motivational_quotes = [
+    "¡Hoy es un gran día para ser mejor que ayer!",
+    "El dolor de hoy es la fuerza de mañana.",
+    "Cada día es una nueva oportunidad para mejorar.",
+    "La constancia es la clave del éxito. ¡No te rindas!",
+    "Lo mejor está por venir, sigue adelante.",
+    "Un pequeño paso cada día, ¡y pronto estarás en la cima!",
+    "Recuerda que la motivación se construye con acción. ¡Sigue adelante!"
+]
+
+# Mensaje de bienvenida
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "¡Hola! Soy tu asistente personal CoreX. Estoy aquí para motivarte todos los días y ayudarte a alcanzar tus metas. 💪"
+    )
+    send_motivational_question(update)
+
+# Comando /help
+def help_command(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text(
+        "¡Estoy aquí para ayudarte! Solo responde a las preguntas diarias y siempre te motivaré a dar lo mejor de ti. 💥"
+    )
+
+# Función para enviar una pregunta motivacional
+def send_motivational_question(update: Update) -> None:
+    question = random.choice(motivational_questions)
+    update.message.reply_text(question)
+
+# Función para manejar las respuestas de los usuarios
+def handle_response(update: Update, context: CallbackContext) -> None:
+    user_message = update.message.text.lower()
+
+    # Si el usuario responde negativamente
+    if "no" in user_message or "no lo he hecho" in user_message:
+        motivational_reply = random.choice([
+            "No te preocupes, ¡todos tenemos días difíciles! Lo importante es que sigas adelante. 💪",
+            "¡No pasa nada! Mañana será un nuevo día para comenzar con más fuerza. ¡Tú puedes!",
+            "¡Ánimo! Cada día es una oportunidad para mejorar. ¡Tú eres más fuerte de lo que crees!"
+        ])
+    else:
+        motivational_reply = random.choice([
+            "¡Excelente! Sigue así, ¡estás en el camino correcto! 🌟",
+            "¡Muy bien! Cada paso te acerca más a tu meta. ¡Vamos con todo!",
+            "¡Fantástico! Recuerda que la constancia es la clave. ¡Sigue trabajando duro!"
+        ])
+
+    update.message.reply_text(motivational_reply)
+    send_motivational_question(update)  # Después de cada respuesta, manda una nueva pregunta
+
+# Función principal para iniciar el bot con polling
 def main():
-    # Iniciar la aplicación de Telegram
-    telegram_app = ApplicationBuilder().token(TOKEN).build()
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
-    telegram_app.job_queue.run_daily(mensajes_diarios, time=datetime.time(hour=8, minute=0))
+    # Agregar manejadores de comandos
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("help", help_command))
 
-    # Iniciar Flask en un hilo separado
-    thread = Thread(target=start_flask)
-    thread.start()
+    # Agregar un manejador para las respuestas
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_response))
 
-    print("🔥 CoreX Assistant está activo... y escuchando en Flask")
-    telegram_app.run_polling()
+    # Iniciar polling para escuchar los mensajes
+    updater.start_polling()
+    updater.idle()  # Mantiene el bot funcionando
 
-if __name__ == "__main__":
+# Configurar Flask para que funcione con Render
+@app.route('/')
+def home():
+    return "El bot está funcionando correctamente!"
+
+if __name__ == '__main__':
+    # Inicia el bot y la aplicación Flask
     main()
+    app.run(debug=True, port=5000)
